@@ -3,10 +3,11 @@
 #include <fstream>
 #include <vector>
 
-const char* FILENAME = "ngc1316o.fit";
-const int HEADER_SIZE = 2880;//header size in bytes
-const int WINDOW_X = 440;
-const int WINDOW_Y = 300;
+#define FILENAME "dss_search"
+#define HEADER_SIZE 2880
+#define X_AXIS 891
+#define Y_AXIS 893
+
 
 SDL_Window* window = nullptr;
 SDL_Renderer* render = nullptr;
@@ -18,7 +19,7 @@ void initializeSDL(){
     }
 
     //generate the window
-    window = SDL_CreateWindow("Fits Image Render", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WINDOW_X, WINDOW_Y, SDL_WINDOW_SHOWN);
+    window = SDL_CreateWindow("Fits Image Render", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, X_AXIS, Y_AXIS, SDL_WINDOW_SHOWN);
 
     if(!window){
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Couldn't create window. Error: %s\n", SDL_GetError());
@@ -41,24 +42,30 @@ void initializeSDL(){
 
 
 //converts binary to RGB format understandable by SDL2
-std::vector<Uint32> binaryToRGB(std::vector<long double> image){
-    std::vector<Uint32> RGBpixelData;
+//NOTE: idk what I was thinking at this point, ignore
+//function not being used
+std::vector<uint16_t> binaryToRGB(std::vector<uint16_t> image){
+    std::vector<uint16_t> RGBpixelData;
     int pixelColor;
     Uint32 pixelRGB;
-    for(long double pixelValue : image){
+    for(uint16_t pixelValue : image){
         pixelColor = pixelValue * 255; //convert from long double to int in range 0-255
+        //Here i thought that using the same value for R,G and B would result in grayscale, apparently not lul
         pixelRGB = SDL_MapRGB(SDL_AllocFormat(SDL_PIXELFORMAT_RGB24), pixelColor, pixelColor, pixelColor);
         RGBpixelData.push_back(pixelRGB);
     }
 
-    return RGBpixelData;
+
+    //uncomment to return whatever abomination of a vector this function creates
+    //return RGBpixelData;
+    return image;
 }
 
 //creates the SDL texture to render it
-void SDLTexture(std::vector<Uint32> &RGBpixelData){
+void SDLTexture(std::vector<uint16_t> &imageVec){
     
-    SDL_Surface* imageSurface = SDL_CreateRGBSurfaceFrom(&RGBpixelData[0], WINDOW_X, WINDOW_Y, 16, WINDOW_X * 3, 0, 0, 0, 0);
-    SDL_Texture* imageTexture = SDL_CreateTextureFromSurface(render, imageSurface);
+    SDL_Texture* imageTexture = SDL_CreateTexture(render, SDL_PIXELFORMAT_ABGR4444, SDL_TEXTUREACCESS_STATIC, X_AXIS, Y_AXIS);
+    SDL_UpdateTexture(imageTexture, nullptr, imageVec.data(), X_AXIS * sizeof(uint16_t));
 
     //clear render
     SDL_RenderClear(render);
@@ -70,10 +77,9 @@ void SDLTexture(std::vector<Uint32> &RGBpixelData){
     SDL_RenderPresent(render);
 
     //waits x ms before shutting down.
-    SDL_Delay(30000);
+    SDL_Delay(2000);
 
     //free resources
-    SDL_FreeSurface(imageSurface);
     SDL_DestroyTexture(imageTexture);
 }
 
@@ -87,24 +93,24 @@ void destroySDL(){
 
 
 //takes maximum value of stored pixels from 0.0 to 1
-void normalizePixelValue(std::vector<long double>& image){
+void normalizePixelValue(std::vector<uint16_t>& imageVec){
     //goes through vector to ensure all values are positive.
-    for(int i = 0; i < (int) image.size(); ++i){
-        image[i] = abs(image[i]);
+    for(int i = 0; i < (int) imageVec.size(); ++i){
+        imageVec[i] = abs(imageVec[i]);
     }
 
     //finds maximum value
-    long double max = 0;
-    for(int i = 0; i < (int) image.size(); ++i){
-        if (max < image.size()){
-            max = image[i];
+    uint16_t max = 0;
+    for(int i = 0; i < (int) imageVec.size(); ++i){
+        if (max < imageVec.size()){
+            max = imageVec[i];
         }
     }
 
     //divides everything by the max pixel value to normalize the range between 0.0 and 1.0
     if(max != 0){
-        for(int i = 0; i < (int) image.size(); ++i){
-            image[i] = image[i]/max;
+        for(int i = 0; i < (int) imageVec.size(); ++i){
+            imageVec[i] = imageVec[i]/max;
         }
     }
 }
@@ -118,67 +124,52 @@ std::ifstream* createFileStream(){
         std::cout << "File loaded." << std::endl;
         return file;
     }else{
-        std::cout << "File not found." << std::endl;
+        std::cerr << "File not found." << std::endl;
         return nullptr;
     }
 }
 
 char* getHeader(std::ifstream* file){
-    char* header = new char[HEADER_SIZE];//FITS header has a fixed length of 2880 bytes
+    char* header = new char[HEADER_SIZE];//FITS header has a fixed length of 2880 uint16_ts
 
     file->read(header, HEADER_SIZE);
     
     return header;
 }
 
-std::vector<long double> getImage(std::ifstream* file){
-    file->seekg(0, std::ios::end);
-    //std::streamsize dataSize = file->tellg();
-    file->seekg(0, std::ios::beg);
+std::vector<uint16_t> getImage(std::ifstream* file){
+    //this is a very janky way of seeking to some point
+    //to remove artifacts on top of the image and to
+    //also center it
+    //NEED PERMANENT SOLUTION AT END OF PROJECT
+    file->seekg(12600, std::ios::beg);
 
-
-    std::vector<long double> data;
-    long double temp;
-
-    while(file->read(reinterpret_cast<char*>(&temp), sizeof(temp))){
-        data.push_back(temp);
+    std::vector<uint16_t> imageVec;
+    uint16_t pixel;
+    while(file->read(reinterpret_cast<char*>(&pixel), sizeof(uint16_t))){
+        imageVec.push_back(pixel);
     }
 
-    return data;
-}
-
-
-//creates vector for testing purposes
-std::vector<long double> testImageGen(){
-    std::vector<long double> image;
-    image.push_back(10);
-    for (int i = 1; i < 512 * 512; ++i){
-        image.push_back(0);
-    }
-    return image;
+    return imageVec;
 }
 
 
 int main(){
     std::ifstream* file = createFileStream();//Stores File Stream in var
-    
+
     char* header = getHeader(file);//Stores Header
-    std::vector<long double> image = getImage(file);//stores binary data
-    
-    //uncomment to use testing function
-    //std::vector<Uint32> RGBpixelData = binaryToRGB(testImageGen());
-    std::vector<Uint32> RGBpixelData = binaryToRGB(image);//stores converted binary data to rgb
+
+    std::vector<uint16_t> imageVec = getImage(file);//stores binary data
 
     
-
-    
-
-
-
-    std::cout << "Max index  ,  " << image[15000] << "  ,  "<< std::endl;
+    //std::vector<uint16_t> RGBpixelData = binaryToRGB(imageVec);//stores converted binary data to rgb
 
     initializeSDL();
-    SDLTexture(RGBpixelData);
+    SDLTexture(imageVec);
+    destroySDL();
+
+
+
 
 
     delete[] header;
