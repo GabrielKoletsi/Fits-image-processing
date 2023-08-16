@@ -8,11 +8,26 @@
 #define HEADER_SIZE 2880
 #define X_AXIS 891
 #define Y_AXIS 893
-#define THRESHOLD 80
-#define MINIMUM_DISTINCTION_DISTANCE 30 //minimum distance of two star center coordinates to be considered different stars  
+#define THRESHOLD 60
+#define MINIMUM_DISTINCTION_DISTANCE 15 //minimum distance of two star center coordinates to be considered different stars  
 
 SDL_Window* window = nullptr;
 SDL_Renderer* render = nullptr;
+SDL_Color green = {0, 255, 0, 255};
+
+
+/// @brief Takes two points and find the distance between them in pixels.
+/// @param x 
+/// @param y 
+/// @param px 
+/// @param py 
+/// @return Distance between two points.
+int calculateDistance(int x, int y, int px, int py){
+    int diffXsq = (x - px) * (x - px);
+    int diffYsq = (y - py) * (y - py);
+    int distance = sqrt(diffXsq + diffYsq);
+    return distance;
+}
 
 
 //contains the data of a pixel of a star
@@ -43,27 +58,27 @@ class StarPixel{
         SDL_Color pixelValue;
 };
 
-//coordinates of star object center
-struct Center{
-    uint16_t avgX;//stores the average x value of every pixel
-    uint16_t avgY;//stores the average y value of every pixel
-};
+
 
 //contains data of a star
 class Star{
     public: 
-    Center centerPixel;
+    int avgX, avgY;
     Star(){
         sumX = sumY = 0;
+        closestStar = nullptr;
     }
     
     Star(StarPixel pixel){
         sumX = sumY = 0;
         addPixel(pixel);
+        closestStar = nullptr;
     }
 
     size_t getSize(){return starSize;}
     
+    std::vector<StarPixel> getStarBlob(){return starBlob;}
+
     void updateSize(){starSize = starBlob.size();}
 
     void addPixel(StarPixel pixel){
@@ -71,21 +86,39 @@ class Star{
         updateSize();
         sumX += pixel.x;
         sumY += pixel.y;
-        centerPixel.avgX = sumX / starSize;
-        centerPixel.avgY = sumY / starSize;
+        avgX = sumX / starSize;
+        avgY = sumY / starSize;
     }
+
 
     void printPixels(){
         for(StarPixel i : starBlob){
-            std::cout << i.x << " " << i.y << " " << i.pixelValue.b << std::endl;
+            std::cout << i.x << " " << i.y << " " << (uint8_t) i.pixelValue.b << std::endl;
         }
     }
+
+    /// @brief Stores the memory address of the closest star and initializes distanceFromClosestStar
+    /// @param star Star object
+    void setClosestStar(Star* star){
+        closestStar = star;
+        if(this->closestStar != nullptr){
+            distanceFromClosestStar = calculateDistance(this->avgX, this->avgY, closestStar->avgX, closestStar->avgY);
+        }
+    }
+
+    Star* getClosestStar(){
+        return closestStar;
+    }
+
+    int getDistanceFromClosestStar(){return distanceFromClosestStar;}
 
     private:
         std::vector<StarPixel> starBlob;
         size_t starSize;//stores size of starBlob vector
         uint64_t sumX;//used to measure the average value of x
         uint64_t sumY;//used to measure the average value of y
+        Star* closestStar;//stores the address of the closest star
+        int distanceFromClosestStar;
         
 };
 
@@ -109,16 +142,20 @@ std::vector<StarPixel> VectorSDL_ColorToStarPixelFormat(std::vector<SDL_Color> c
 //else returns true
 bool checkPixelSurroundings(int x_, int y_, std::vector<SDL_Color>& colorVec){
     //compares the 8 pixels surrounding the pixel examined for being above threshold
+    int valueSum = 0; //hold the sum of the surrounding pixel values
+    uint8_t avgValue;
     if (y_ < 5 || y_ > (Y_AXIS - 5) || x_ < 5 || x_ > (X_AXIS - 5)){
         return false;
     }
-    for (uint16_t y = y_ - 3; y < y_ + 4; ++y){
-        for (uint16_t x = x_ - 3; x < x_ + 4; ++x){
-            if (colorVec[y * X_AXIS + x].b < THRESHOLD){
-                return false;
+    for (uint16_t y = y_ - 1; y < y_ + 2; ++y){
+        for (uint16_t x = x_ - 1; x < x_ + 2; ++x){
+            if(x != x_ && y != y_){
+                valueSum += colorVec[y * X_AXIS + x].b;
             }
         }
     }
+    avgValue = valueSum / 8;
+    if(avgValue > THRESHOLD){return false;}
     return true;
 }
 
@@ -132,20 +169,53 @@ bool checkPixelSurroundings(int x_, int y_, std::vector<SDL_Color>& colorVec){
 int32_t returnStarIndex(int x, int y, std::vector<Star> &stars){
     //if the stars vector is empty, return -1
     if(stars.size() == 0){return -1;}
+    uint32_t minDistance; //minimum distance between a pixel compared to a pixel belonging to a star
     uint16_t distance;
     uint16_t diffXsq;//the difference of the x coordinates squared
     uint16_t diffYsq;//the difference of the y coordinates squared 
+    std::vector<StarPixel> starBlob;
     for (uint32_t i = 0; i < stars.size(); ++i){
-        diffXsq = (x - stars[i].centerPixel.avgX) * (x - stars[i].centerPixel.avgX);
-        diffYsq = (y - stars[i].centerPixel.avgY) * (y - stars[i].centerPixel.avgY);
-        distance = sqrt(diffXsq + diffYsq);
-        if (distance < MINIMUM_DISTINCTION_DISTANCE){
-            return i;
+        starBlob = stars[i].getStarBlob();
+        minDistance = sqrt(X_AXIS * X_AXIS + Y_AXIS * Y_AXIS);//sets minimum distance to the maximum distance possible 
+        for(uint64_t j = 0; j < starBlob.size(); ++j){    
+            diffXsq = (x - starBlob[j].x) * (x - starBlob[j].x);
+            diffYsq = (y - starBlob[j].y) * (y - starBlob[j].y);
+            distance = sqrt(diffXsq + diffYsq);
+            if(minDistance > distance){
+                minDistance = distance;
+            }
+            if (minDistance < MINIMUM_DISTINCTION_DISTANCE){
+                return i;
+            }
         }
     }
     return -1;
     
-}
+} 
+
+/* int32_t returnStarIndex(int x, int y, std::vector<Star>& stars, std::vector<SDL_Color> colorVec){
+    if(stars.size() == 0){return -1;}
+    uint16_t diffX;//the difference of the x coordinates squared
+    uint16_t diffY;//the difference of the y coordinates squared 
+    uint16_t y_;
+    int count;//counts how many pixels are under threshhold in line
+    
+    for (uint64_t i = 0; i < stars.size(); ++i){
+        diffX = x - stars[i].centerPixel.avgX;
+        diffY = y - stars[i].centerPixel.avgY;
+        count = 0;
+        for(int x_ = x; x < stars[i].centerPixel.avgX; ++x){
+            y_ = (diffY/diffX) * (x_ - x) + y;
+            if(colorVec[y_ * X_AXIS + x_].b < THRESHOLD){
+                ++count;
+            }
+        }
+        if(count < 2){
+            return i;
+        }
+    }
+    return -1;
+} */
 
 void addToStarClassVector(std::vector<SDL_Color> &colorVec, std::vector<Star>& stars){
     int32_t index;//holds return value of returnStarIndex
@@ -177,17 +247,22 @@ void addToStarClassVector(std::vector<SDL_Color> &colorVec, std::vector<Star>& s
     }
 }
 
-std::vector<std::vector<double>> gaussianKernel(){
-    int KernelDimension = 5;
-    std::vector<std::vector<double>> GaussianKernel;
-    std::vector<double> vec = {0, 0, 0, 0, 0};
+
+/// @brief Generates Gaussian Kernel
+/// @param sigma Standard deviation
+/// @param KernelDimension Dimension of kernel
+/// @return Gaussian Kernel vector
+std::vector<std::vector<double>> GaussianKernel(double sigma, int KernelDimension){
+    std::vector<std::vector<double>> GKernel;
+    std::vector<double> vec;
     
-    for(int i = 0; i < KernelDimension; ++i){
-        GaussianKernel.push_back(vec); 
+    for(int j = 0; j < KernelDimension; ++j){
+        for(int i = 0; i < KernelDimension; ++i){
+            vec.push_back(0); 
+        }
+        GKernel.push_back(vec);
     }
-    
     //iniatializing standard deviation
-    double sigma = 1.0;
     double r, s = 2.0 * sigma * sigma;
 
     //sum is used for normalization
@@ -197,26 +272,31 @@ std::vector<std::vector<double>> gaussianKernel(){
     for(int x = -2; x <= 2; ++x){
         for(int y = -2; y <= 2; ++y){
             r = sqrt(x * x + y * y);
-            GaussianKernel[x + 2][y + 2] = (exp(-(r * r) / s)) / (M_PI * s);
-            sum += GaussianKernel[x + 2][y + 2];
+            GKernel[x + 2][y + 2] = (exp(-(r * r) / s)) / (M_PI * s);
+            sum += GKernel[x + 2][y + 2];
         }
     }
 
     for (int i = 0; i < 5; ++i){
         for (int j = 0; j < 5; ++j){
-            GaussianKernel[i][j] /= sum;
+            GKernel[i][j] /= sum;
         }
     }
 
-    return GaussianKernel;
+    return GKernel;
 }
 
-std::vector<SDL_Color> gaussianBlur(const std::vector<SDL_Color>& colorVec){
+/// @brief Applies Gaussian filter. 
+/// @param colorVec Vector of SDL_Color, containing the image to be blurred. 
+/// @param sigma Standard deviation in the creation of the Kernel 
+/// @param KernelDimension The size of the kernel used
+/// @return SDL_Color vector with Gaussian filter applied
+std::vector<SDL_Color> GaussianBlur(const std::vector<SDL_Color>& colorVec, double sigma, int KernelDimension){
     const uint16_t BORDER_DISTANCE = 5;
     size_t valueSum;//sum of all surrounding pixel values
     uint8_t avgValue;//the average value of surrounding pixels using kernel
     double kernelSum;//the sum of all the kernel values
-    std::vector<std::vector<double>> GKernel = gaussianKernel();
+    std::vector<std::vector<double>> GKernel = GaussianKernel(sigma, KernelDimension);
     std::vector<SDL_Color> imageBlurred;
     SDL_Color color;
     uint16_t h, w;//indexes to keep track of kernel iterations
@@ -248,35 +328,37 @@ std::vector<SDL_Color> gaussianBlur(const std::vector<SDL_Color>& colorVec){
 
 }
 
-
- //this works really poorly. 
-/* std::vector<uint16_t> boxBlur(const std::vector<StarPixel>& imageVec){
+/// @brief uses box blur algorithm for convolution
+/// @param colorVec vector storing SDL_Color elements. Image is loaded here with r, g, b, a values
+/// @return image with box blur applied. Image is stored in SDL_Color vector
+std::vector<SDL_Color> boxBlur(const std::vector<SDL_Color>& colorVec){
     size_t valueSum;//sum of all surrounding pixel values
-    uint16_t avgValue;//the average value of surrounding pixels
+    SDL_Color avgValue;//the average value of surrounding pixels
     uint16_t index;
-    std::vector<uint16_t> imageBlurred;
-    for(size_t i = 0; i < imageVec.size() - 2; ++i){
+    std::vector<SDL_Color> imageBlurred;
+    avgValue.a = 0xFF;
+    for(size_t i = 0; i < colorVec.size(); ++i){
         //checks if i is not within 5 pixels of the edges
         valueSum = 0;
         index = 0;
  
-        if(i > (X_AXIS * 10) && (i % X_AXIS) > 10 && i < ((Y_AXIS - 10) * X_AXIS) && (i % X_AXIS) < (X_AXIS - 10)){
-            for (uint16_t y = imageVec[i].y - 1; y < imageVec[i].y + 2; ++y){
-                for (uint16_t x = imageVec[i].x - 1; x < imageVec[i].x + 2; ++x){
-                    valueSum += imageVec[y * X_AXIS + x].intensity;
+        if(i > (X_AXIS * 5) && (i % X_AXIS) > 5 && i < ((Y_AXIS - 5) * X_AXIS) && (i % X_AXIS) < (X_AXIS - 5)){
+            for (uint16_t y = (i / X_AXIS) - 2; y < (i / X_AXIS) + 3; ++y){
+                for (uint16_t x = (i % X_AXIS) - 2; x < (i % X_AXIS) + 3; ++x){
+                    valueSum += colorVec[y * X_AXIS + x].b;
                     index+=1;
                 }
             }
-            avgValue = valueSum / index;
+            avgValue.b = avgValue.r = avgValue.g = valueSum / index;
             imageBlurred.push_back(avgValue);
         }else{
-            imageBlurred.push_back(imageVec[i].intensity);
+            imageBlurred.push_back(colorVec[i]);
         }
     }
     return imageBlurred;
-}  */
+}
 
-
+/// @brief Initializes SDL, SDL_Window, SDL_Renderer and TTF while checking for errors
 void initializeSDL(){
     if(SDL_Init(SDL_INIT_VIDEO) < 0){
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Could not initialize SDL. Error: %s\n", SDL_GetError());
@@ -312,9 +394,10 @@ void initializeSDL(){
 }
 
 
-//x_axis x coordinate of center
-//y_axis y coordinate of center
-//width width of circle in pixels
+/// @brief draws red circle 
+/// @param x_axis x coordinate of center of circle
+/// @param y_axis y coordinate of center of circle 
+/// @param radius radius of circle
 void drawCircle(int x_axis, int y_axis, int radius){
     uint32_t x,y;
     uint32_t avgX, avgY = 0;
@@ -329,14 +412,63 @@ void drawCircle(int x_axis, int y_axis, int radius){
     }   
 }
 
-void circleStars(std::vector<Star> stars){
-    for (Star i : stars){
-        drawCircle(i.centerPixel.avgX, i.centerPixel.avgY, 10);
-    } 
 
+/// @brief Renders the text contained in the string "text"
+/// @param x_ x coordinate used
+/// @param y_ y coordinate used
+/// @param text text to render
+/// @param font font to use for the text
+/// @param color color of text
+void printText(int x_, int y_, std::string text, TTF_Font* font){
+    SDL_Rect rect;
+    rect.x = x_ - 5;
+    rect.y = y_ - 25;
+    rect.h = 25;
+    rect.w = text.size() * 10;
+
+    SDL_Surface* textSurface = TTF_RenderText_Solid(font, text.c_str(), green);
+    SDL_Texture* textTexture = SDL_CreateTextureFromSurface(render, textSurface);
+    SDL_RenderCopy(render, textTexture, nullptr, &rect);
 }
 
-void createPixelInfoRect(TTF_Font* font, SDL_Color color, int x, int y, std::vector<SDL_Color>& colorVec) { 
+/// @brief Calls drawCircle() and printText() by iterating through the stars vector
+/// @param stars the vector containing Star objects
+/// @param font TTF font for rendering the index of the star
+/// @param color color used for rendering the text
+void circleStars(std::vector<Star> stars, TTF_Font* font){
+    for (int i = 0; i < stars.size(); ++i){
+        
+        drawCircle(stars[i].avgX, stars[i].avgY, 10);
+        SDL_RenderDrawLine(render, stars[i].avgX, stars[i].avgY, stars[i].getClosestStar()->avgX, stars[i].getClosestStar()->avgY);
+        printText(stars[i].avgX, stars[i].avgY, std::to_string(i), font);
+    } 
+}
+
+
+
+void findClosestStar(std::vector<Star>& stars){
+    uint32_t minDistance;//Minimum distance between stars
+    uint32_t x1, x2, y1, y2;
+    int distance;
+    for(int i = 0; i < stars.size(); ++i){
+        minDistance = sqrt(X_AXIS * X_AXIS + Y_AXIS * Y_AXIS);
+        for(int j = 0; j < stars.size(); ++j){
+            if(&stars[i] != &stars[j]){
+                x1 = stars[i].avgX, x2 = stars[j].avgX;
+                y1 = stars[i].avgY, y2 = stars[j].avgY;
+
+                distance = calculateDistance(x1, y1, x2, y2);
+                if(minDistance >= distance){
+                    minDistance = distance;
+                    stars[i].setClosestStar(&stars[j]);
+                }
+            }
+        }
+    }
+}
+
+
+void createPixelInfoRect(int x, int y, std::vector<SDL_Color>& colorVec, TTF_Font* font) { 
     SDL_Rect rect1;
     SDL_Rect rect2;
     if(X_AXIS - x < 120){
@@ -344,9 +476,9 @@ void createPixelInfoRect(TTF_Font* font, SDL_Color color, int x, int y, std::vec
     }else{
         rect1.x = rect2.x = x + 20;
     }
-    if(Y_AXIS - y < 44){
-        rect1.y = Y_AXIS - 44;
-        rect2.y = Y_AXIS - 44;
+    if(Y_AXIS - y < 43){
+        rect1.y = Y_AXIS - 43;
+        rect2.y = Y_AXIS - 19;
     }else{
         rect1.y = y;
         rect2.y = y + 25;
@@ -360,10 +492,10 @@ void createPixelInfoRect(TTF_Font* font, SDL_Color color, int x, int y, std::vec
     
     rect2.w = intensity.size() * 10;
 
-    SDL_Surface* intensitySurface = TTF_RenderText_Solid(font, intensity.c_str(), color);
+    SDL_Surface* intensitySurface = TTF_RenderText_Solid(font, intensity.c_str(), green);
     SDL_Texture* intensityMessage = SDL_CreateTextureFromSurface(render, intensitySurface);
 
-    SDL_Surface* surfaceMessage = TTF_RenderText_Solid(font, pixelInfo.c_str(), color);
+    SDL_Surface* surfaceMessage = TTF_RenderText_Solid(font, pixelInfo.c_str(), green);
     SDL_Texture* Message = SDL_CreateTextureFromSurface(render, surfaceMessage);
     SDL_RenderCopy(render, Message, nullptr, &rect1);
     SDL_RenderCopy(render, intensityMessage, nullptr, &rect2);
@@ -382,10 +514,29 @@ std::vector<SDL_Color> convertToColor(std::vector<uint16_t>& imageVec){
     return colorVec;
 }
 
+/// @brief Linear histogram to change the lighting levels of the image.
+/// @param colorVec vector containing image in SDL_Color format
+/// @param F value by which to multiply all values
+/// @note Alters the vector passed as a parameter itself. If F = 1 then no action is taken.
+void linearHistogram(std::vector<SDL_Color>& colorVec, double F){
+    if(F == 1){
+        SDL_Color color;
+        color.a = 255;
+        for(uint64_t i = 0; i < colorVec.size(); ++i){
+            if(colorVec[i].b * F > 0xFF){
+                colorVec[i].b = colorVec[i].g = colorVec[i].r = 0xFF;
+            }else{
+                color.b = color.g = color.r = (uint8_t)colorVec[i].b * F;
+                colorVec[i] = color;
+            }
+        }
+    }
+}
+
 //creates the SDL texture to render it
-void SDLTexture(std::vector<SDL_Color> &colorVec, std::vector<Star> stars, SDL_Color textColor){
-    TTF_Font* Sans = TTF_OpenFont("Pixellettersfull-BnJ5.ttf", 12);
-        
+void SDLTexture(std::vector<SDL_Color> &colorVec, std::vector<Star> stars){
+    TTF_Font* font = TTF_OpenFont("Pixellettersfull-BnJ5.ttf", 12);
+
     SDL_Surface* imageSurface = SDL_CreateRGBSurfaceWithFormatFrom(&colorVec[0], X_AXIS, Y_AXIS, 32, X_AXIS * 4, SDL_PIXELFORMAT_ABGR8888);
     SDL_Texture* imageTexture = SDL_CreateTextureFromSurface(render, imageSurface);
     
@@ -406,9 +557,9 @@ void SDLTexture(std::vector<SDL_Color> &colorVec, std::vector<Star> stars, SDL_C
 
                 SDL_RenderCopy(render, imageTexture, nullptr, nullptr);
 
-                circleStars(stars);
+                circleStars(stars, font);
 
-                createPixelInfoRect(Sans, textColor, mouseX, mouseY,colorVec);
+                createPixelInfoRect(mouseX, mouseY,colorVec, font);
 
                 SDL_RenderPresent(render);
 
@@ -466,18 +617,7 @@ std::vector<uint16_t> getImage(std::ifstream* file){
 }
 
 
-
-std::vector<uint16_t> minMaxValues(std::vector<uint16_t> imageVec){
-    
-
-    return imageVec;
-}
-
-
 int main(){
-    SDL_Color green;
-    green.r = green.b = 0;
-    green.g = green.a = 255;
 
     std::ifstream* file = createFileStream();//Stores File Stream in var
 
@@ -487,25 +627,17 @@ int main(){
     std::vector<SDL_Color> colorVec = convertToColor(imageVec);
 
     std::vector<StarPixel> starPixelVec = VectorSDL_ColorToStarPixelFormat(colorVec);
-    std::vector<SDL_Color> blurredImage = gaussianBlur(colorVec);
+    std::vector<SDL_Color> blurredImage = GaussianBlur(colorVec, 1.0, 5);
     std::vector<Star> stars;
-    addToStarClassVector(colorVec, stars);
-    std::vector<Star>::iterator i = stars.begin();
-    
-/*     while(i != stars.end()){
-        if(i->getSize() < 15){
-            stars.erase(i);
-            i = stars.begin();
-        }
-        ++i;
-    } */
-
+    addToStarClassVector(blurredImage, stars);
+    findClosestStar(stars);
+    linearHistogram(colorVec, 1.0);
     std::cout << "Number of stars detected: " << stars.size() << std::endl;
-
+    
 
     initializeSDL();
 
-    SDLTexture(colorVec, stars, green);
+    SDLTexture(colorVec, stars);
 
     destroySDL();
 
