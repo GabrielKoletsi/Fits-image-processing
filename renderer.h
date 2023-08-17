@@ -6,8 +6,6 @@
 #include <SDL2/SDL_ttf.h>
 #include "fileio.h"
 
-#define X_AXIS 891
-#define Y_AXIS 893
 
 extern SDL_Window* window;
 extern SDL_Renderer* render;
