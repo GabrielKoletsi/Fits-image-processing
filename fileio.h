@@ -7,6 +7,8 @@
 
 #define HEADER_SIZE 2880
 #define FILENAME "dss_search"
+#define X_AXIS 891
+#define Y_AXIS 893
 
 /// @brief Loads image data stream into file.
 /// @return Pointer to file object with binary format.
