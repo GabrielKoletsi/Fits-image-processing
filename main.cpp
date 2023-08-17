@@ -11,11 +11,11 @@ SDL_Renderer* render = nullptr;
 
 int main(){
 
-    std::ifstream* file = createFileStream();//Stores File Stream in var
+    std::ifstream* file = createFileStream();
 
-    char* header = getHeader(file);//Stores Header
+    char* header = getHeader(file);
 
-    std::vector<uint16_t> imageVec = getImage(file);//stores binary data
+    std::vector<uint16_t> imageVec = getImage(file);
     std::vector<SDL_Color> colorVec = convertToColor(imageVec);
 
     std::vector<StarPixel> starPixelVec = VectorSDL_ColorToStarPixelFormat(colorVec);
